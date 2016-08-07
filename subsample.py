@@ -1,6 +1,5 @@
 from collections import OrderedDict
 from itertools import takewhile, chain
-import string
 import pickle
 import argparse
 import re
@@ -11,9 +10,9 @@ def parse_argument():
     parser.add_argument('-i', '--inputFile', help="input file")
     parser.add_argument('-c', '--countFile',
                         help="bin(pickle) word count file")
-    parser.add_argument('-t', '--threshold', type=int, default=1e-5,
+    parser.add_argument('-t', '--threshold', type=float, default=1e-5,
                         help="the threshold value, default = 1e-5")
-    parser.add_argument('-m', '--minFreq', type=int, default=5,
+    parser.add_argument('-m', '--minFreq', type=float, default=5.0,
                         help="minimal frequency count, default = 5")
     parser.add_argument('-o', '--outputFile', help='output file')
     return parser.parse_known_args()
@@ -30,6 +29,7 @@ def readCountFile(options):
     counterInfo['frequent'] = OrderedDict(takewhile(
         lambda x: x[1] > counterInfo['thresholdCount'],
         counter.most_common()))
+    counterInfo['counter'] = counter
     return counterInfo
 
 def filterfalse(predicate, iterable):
@@ -41,34 +41,37 @@ def filterfalse(predicate, iterable):
             yield x
 
 def isSampled(token, counterInfo):
-    isRare = token in counterInfo['rare']
     isPunctuation = not token.isalnum()
     isFrequent = token in counterInfo['frequent']
+    isMiddle = (token not in counterInfo['rare'] and
+                token not in counterInfo['frequent'])
     isStayed = False
+    proba = -1
     if isFrequent:
-        isStayed = np.sqrt((1 / counterInfo['frequent'][token]) *
-                           counterInfo['thresholdCount']) < np.random.random()
-    return isPunctuation or isRare or (isFrequent and isStayed)
+        proba = np.sqrt((counterInfo['thresholdCount'] /
+                         counterInfo['frequent'][token]))
+        isStayed = proba > np.random.random()
+    return isPunctuation or isMiddle or (isFrequent and isStayed)
 
 def main():
     options, args = parse_argument()
     counterInfo = readCountFile(options)
-    print "Start streaming the file..."
-    np.random.seed(87)
+    print "Total count: {}".format(counterInfo['totalCount'])
+    print "Threshold count: {}".format(counterInfo['thresholdCount'])
+    print "Minimal count: {}".format(options.minFreq)
     pattern = re.compile('([\W_]+)')
 
     fout = open(options.outputFile, 'w')
     with open(options.inputFile, 'r') as f:
+        print "Reading input from {}".format(options.inputFile)
         listIter = chain.from_iterable(
             pattern.split(line.lower().strip())
             for line in f)
-        fout.write(''.join(
-            list(filterfalse(lambda x: not isSampled(x, counterInfo),
-                             listIter))))
-    print "Write out to {}".format(options.outputFile)
+        print "Writing output to {}".format(options.outputFile)
+        fout.writelines(item for item in
+                        filterfalse(lambda x: not isSampled(x, counterInfo),
+                                    listIter))
     fout.close()
-
-    # return counter
 
 if __name__ == "__main__":
     main()
